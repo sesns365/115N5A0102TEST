@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>考卷報讀點讀工具</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --exam-font-size: 22px; }
+    html { scroll-behavior: smooth; }
+    body { font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; }
+    .exam-text { font-size: var(--exam-font-size); line-height: 1.9; }
+    .speakable { transition: background-color .18s ease, box-shadow .18s ease, border-color .18s ease; }
+    .speaking-now {
+      background: #fef08a !important;
+      border-color: #eab308 !important;
+      box-shadow: 0 0 0 4px rgba(234,179,8,.20) !important;
+    }
+    .choice-btn { min-height: 58px; }
+    .choice-btn[aria-checked="true"] {
+      background: #fef9c3;
+      border-color: #eab308;
+      box-shadow: 0 0 0 3px rgba(234,179,8,.16);
+    }
+    .word-choice[aria-checked="true"] {
+      background: #fef9c3;
+      border-color: #eab308;
+      color: #854d0e;
+      font-weight: 700;
+    }
+    .control-card { backdrop-filter: blur(12px); }
+    .unanswered-ring {
+      border-color: #ef4444 !important;
+      box-shadow: 0 0 0 4px rgba(239,68,68,.14) !important;
+    }
+    .wrong-card { border-left: 6px solid #ef4444; }
+    .correct-card { border-left: 6px solid #22c55e; }
+    @media (max-width: 640px) {
+      .exam-text { line-height: 1.75; }
+      .choice-btn { min-height: 64px; }
+    }
+    @media print {
+      #controlPanel, #actionBar, #toast { display:none !important; }
+      body { background:white !important; }
+      .paper { box-shadow:none !important; border:none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+  <div id="nameGate" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm">
+    <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+      <div class="mb-6 text-center">
+        <div class="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-yellow-100 text-3xl">🔊</div>
+        <h1 class="text-2xl font-black text-slate-900">考卷報讀點讀工具</h1>
+        <p class="mt-2 text-sm text-slate-600">請先輸入姓名，再開始作答。</p>
+      </div>
+      <label class="block">
+        <span class="mb-2 block font-bold text-slate-800">學生姓名</span>
+        <input id="studentName" type="text" autocomplete="off" placeholder="請輸入姓名" class="w-full rounded-2xl border-2 border-slate-300 px-4 py-4 text-lg outline-none focus:border-yellow-500 focus:ring-4 focus:ring-yellow-100" />
+      </label>
+      <button id="startExamBtn" type="button" class="mt-5 w-full rounded-2xl bg-slate-900 px-5 py-4 text-lg font-black text-white shadow-lg hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-300">開始作答</button>
+    </div>
+  </div>
+
+  <header id="controlPanel" class="sticky top-0 z-50 border-b border-slate-200 bg-white/95 shadow-sm control-card">
+    <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3 py-3 sm:px-5">
+      <div class="min-w-0">
+        <h1 class="truncate text-lg font-black text-slate-900 sm:text-xl">考卷報讀點讀工具</h1>
+        <p id="studentDisplay" class="truncate text-sm font-bold text-slate-600"></p>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        <button id="stopSpeechBtn" type="button" title="停止朗讀" aria-label="停止朗讀" class="flex h-11 w-11 items-center justify-center rounded-full bg-rose-100 text-xl text-rose-700 hover:bg-rose-200 focus:outline-none focus:ring-4 focus:ring-rose-100">■</button>
+        <button id="settingsBtn" type="button" title="朗讀設定" aria-label="開啟朗讀設定" aria-expanded="false" class="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-2xl hover:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-slate-200">⚙️</button>
+      </div>
+    </div>
+    <div id="settingsDrawer" class="hidden border-t border-slate-200 bg-slate-50">
+      <div class="mx-auto grid max-w-6xl gap-3 px-3 py-4 sm:grid-cols-2 lg:grid-cols-3 sm:px-5">
+        <label class="rounded-xl border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
+          <span class="mb-2 block text-sm font-bold text-slate-700">中文語音</span>
+          <select id="voiceSelect" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-100"><option>載入系統語音中…</option></select>
+        </label>
+        <label class="rounded-xl border border-slate-200 bg-white p-3">
+          <div class="mb-2 flex items-center justify-between"><span class="text-sm font-bold text-slate-700">語速</span><span id="rateValue" class="rounded-full bg-yellow-100 px-2 py-1 text-sm font-bold text-yellow-800">1.0x</span></div>
+          <input id="rateSlider" type="range" min="0.5" max="2" value="1" step="0.1" class="w-full accent-yellow-500" />
+        </label>
+        <label class="rounded-xl border border-slate-200 bg-white p-3">
+          <div class="mb-2 flex items-center justify-between"><span class="text-sm font-bold text-slate-700">字體大小</span><span id="fontValue" class="rounded-full bg-yellow-100 px-2 py-1 text-sm font-bold text-yellow-800">22px</span></div>
+          <input id="fontSlider" type="range" min="18" max="34" value="22" step="1" class="w-full accent-yellow-500" />
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-5xl px-3 py-5 sm:px-5 sm:py-8">
+    <section class="paper rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-7">
+      <div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-base leading-7 text-amber-950">
+        <strong>操作提醒：</strong>點一下題目、選項或詞語即可朗讀；正在朗讀的內容會變成黃色。點選的答案會保持黃色。完成後請按「送出答案」。若有漏答，系統會提醒並帶你回到尚未完成的題目；送出後會立即顯示分數與錯題回饋。
+      </div>
+
+      <div id="exam" class="exam-text space-y-10">
+        <section aria-labelledby="section2-title">
+          <div class="mb-5 border-b-2 border-slate-200 pb-3">
+            <h2 id="section2-title" tabindex="0" data-speak="二、把對的語詞圈起來。每格二分，共十分。" class="speakable cursor-pointer rounded-lg border border-transparent px-2 py-2 text-2xl font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-yellow-200">二、把對的語詞圈起來：每格 二 分、共 十 分</h2>
+          </div>
+          <div id="vocabQuestions" class="space-y-6"></div>
+        </section>
+
+        <section aria-labelledby="section3-title">
+          <div class="mb-5 border-b-2 border-slate-200 pb-3">
+            <h2 id="section3-title" tabindex="0" data-speak="三、課文文意測驗。每格二分，共四十分。" class="speakable cursor-pointer rounded-lg border border-transparent px-2 py-2 text-2xl font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-yellow-200">三、課文文意測驗：每格 二 分、共 四十 分</h2>
+          </div>
+          <div id="mcQuestions" class="space-y-8"></div>
+        </section>
+      </div>
+
+      <section id="resultPanel" class="mt-8 hidden rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4 sm:p-6">
+        <div class="text-center">
+          <div class="text-sm font-bold text-emerald-700">測驗完成</div>
+          <div id="scoreBig" class="mt-1 text-5xl font-black text-slate-900">0 分</div>
+          <div id="scoreSummary" class="mt-2 text-lg font-bold text-slate-700"></div>
+        </div>
+        <div id="wrongFeedback" class="mt-6 space-y-3"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="actionBar" class="sticky bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-[0_-6px_20px_rgba(15,23,42,0.08)] control-card">
+    <div class="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:justify-end">
+      <button id="clearBtn" type="button" class="rounded-xl border-2 border-slate-300 bg-white px-5 py-3 text-base font-bold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200">清除本次作答</button>
+      <button id="submitBtn" type="button" class="rounded-xl bg-yellow-400 px-6 py-3 text-base font-black text-slate-950 shadow hover:bg-yellow-500 focus:outline-none focus:ring-4 focus:ring-yellow-200">送出答案</button>
+      <button id="downloadPngBtn" type="button" class="hidden rounded-xl bg-sky-600 px-5 py-3 text-base font-bold text-white shadow hover:bg-sky-700 focus:outline-none focus:ring-4 focus:ring-sky-200">下載結果圖檔（PNG）</button>
+      <button id="downloadWordBtn" type="button" class="hidden rounded-xl bg-blue-700 px-5 py-3 text-base font-bold text-white shadow hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200">下載結果（Word）</button>
+    </div>
+  </div>
+
+  <div id="alertModal" class="fixed inset-0 z-[90] hidden items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="alertTitle">
+    <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+      <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-3xl">⚠️</div>
+      <h2 id="alertTitle" class="text-center text-xl font-black text-slate-900">還有題目尚未作答</h2>
+      <p id="alertMessage" class="mt-3 whitespace-pre-line text-center leading-7 text-slate-600"></p>
+      <button id="alertCloseBtn" type="button" class="mt-5 w-full rounded-2xl bg-yellow-400 px-5 py-3 font-black text-slate-950 hover:bg-yellow-500 focus:outline-none focus:ring-4 focus:ring-yellow-200">回去完成作答</button>
+    </div>
+  </div>
+
+  <div id="submitModal" class="fixed inset-0 z-[90] hidden items-center justify-center bg-slate-900/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="submitTitle">
+    <div class="w-full max-w-md rounded-3xl bg-white p-6 text-center shadow-2xl">
+      <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-3xl">✓</div>
+      <h2 id="submitTitle" class="text-xl font-black text-slate-900">答案已成功送出</h2>
+      <div id="modalScore" class="mt-3 text-4xl font-black text-emerald-700">0 分</div>
+      <p id="modalFeedback" class="mt-3 leading-7 text-slate-600"></p>
+      <button id="submitCloseBtn" type="button" class="mt-5 w-full rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-200">查看錯題回饋</button>
+    </div>
+  </div>
+
+  <div id="toast" class="pointer-events-none fixed bottom-24 left-1/2 z-[60] hidden -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg"></div>
+
+  <script>
+    const vocabData = [
+      { id: '2-1', before: '小和心胸開闊，待人又相當', after: '，因此他的人緣很好。', options: ['寬容', '嚴格'] },
+      { id: '2-2', before: '她', after: '的望著大排長龍的隊伍，深怕趕不上這班火車。', options: ['焦點', '焦急'] },
+      { id: '2-3', before: '服務生用心對待每位顧客的服務態度，為店家立下了良好的', after: '。', options: ['石碑', '口碑'] },
+      { id: '2-4', before: '他做事有', after: '又不容易出錯，是老闆的得力助手。', options: ['概率', '效率'] },
+      { id: '2-5', before: '這裡的書籍全都被他整理得', after: '，讓人一眼就能找到想要的書籍。', options: ['井然有序', '耳目一新'] }
+    ];
+
+    const mcData = [
+      { q: '根據幸福筆記本課文描述，下列何者是「幸福筆記本」的功能？', o: ['美好時刻變得不易被發現', '可以留下值得回味的幸福感受', '寫下的字會隨著時間越來越好看', '能了解到自己的個性如何'] },
+      { q: '在幸福筆記本一文中，在「交通事故」這一段敘述中，作者的心情變化為何？', o: ['焦急期待', '生氣痛苦', '期待感謝', '焦急感謝'] },
+      { q: '幸福筆記本一文的主旨是什麼？', o: ['保持身體健康才能擁有幸福的家庭', '抱持著感恩的心，就能感受到幸福', '行車要注意安全，否則會損失錢財', '擁有良好的記憶力，就能變成幸福的人'] },
+      { q: '在幸福筆記本一文中，作者從交通事故中得到的寶貴建議是什麼？', o: ['修車的注意事項', '停車技巧', '消除擦痕的方法', '如何索取賠償金'] },
+      { q: '在幸福筆記本一文中，是什麼消除了作者一天的疲累？', o: ['家人的擁抱與笑容', '美味的晚餐', '豐厚的薪水', '父母的照顧與安慰'] },
+      { q: '在幸福筆記本一文中，作者認為是什麼讓他看到了生活中的亮點？', o: ['笑臉', '健康', '擁抱', '感恩'] },
+      { q: '下列關於幸福筆記本一文的敘述，何者錯誤？', o: ['作者父親的健康狀況不佳', '作者的父親有一頭白髮', '作者的孩子會跟他分享學校的事', '作者和孩子間會互相擁抱'] },
+      { q: 'ㄅ我忽然有種幸福的感覺，感謝上天讓年邁的父親，依然健康。\nㄆ當下，有一道暖流灌注心底，一身疲倦立刻消失，精神也回來了！能有家人的擁抱，讓我滿懷感恩。\nㄇ車主沒有責怪我，也沒有索取賠償，甚至分享停車技巧。……我對他的寬容心存感謝，覺得自己不光得到了寶貴的建議，而且感受到善意的溫暖。\n上述三段文句是擷取幸福筆記本課文內容，作者分享三件令他感到幸福的事，這三件事的共同點是什麼？', o: ['都需要作者付出大量時間與心力才能完成', '作者對事情都懷著感恩的心', '幸福的來源都是家人', '都是負面、讓人難過的事情'] },
+      { q: '讀完做人做事做長久課文後，請判斷下列哪一個人的行為與文中的小師傅一樣，擁有「敬業精神」？', o: ['艾利看到同學情緒低落，對他敬而遠之，毫不搭理', '小文跑步雖然快，但因為自視甚高，常請假不來練習', '做事總是拖拖拉拉的悅書，每次都在快上課前才要去上廁所', '擔任國語小老師的智成，在時間內收齊作業，並按座號排好交給老師'] },
+      { q: '在做人做事做長久一文中，小師傅的服務精神讓作者有什麼樣的感受？', o: ['驚喜', '難過', '生氣', '無奈'] },
+      { q: '在做人做事做長久一文中，作者認為小師傅的工作態度和一般人有什麼不同？', o: ['猶豫不決又拖拖拉拉的', '技術高超卻十分散漫', '細心、認真，會盡力將事情做到完善', '做事果斷、俐落，但自視甚高、目中無人'] },
+      { q: '在做人做事做長久一文中，小師傅向作者直言自己的安裝經驗不是很豐富。從上述的行為可知，小師傅應該是一位怎樣的人？', o: ['非常的膽小、怕事', '很誠實', '很會為自己找藉口', '十分自負'] },
+      { q: '在做人做事做長久一文中，作者認為小師傅達到什麼條件就能成功？', o: ['大學畢業', '年紀到了一定的歲數', '保持精確、完善的工作態度和服務精神，並累積長久的經驗', '安裝過的冷氣機數量達到了店長的要求'] },
+      { q: '做人做事做長久一文中，為什麼小師傅說「顧客的口碑是業績的最大保障」？', o: ['顧客不會和別人討論業績', '顧客覺得服務良好，就會推薦朋友', '顧客送的匾額可以吸引其他人', '為顧客做的紀念品可以發送給其他人'] },
+      { q: '做人做事做長久一文中，小師傅拿什麼清掃地板？', o: ['抹布', '吸塵器', '小掃把', '工作腰帶'] },
+      { q: '在做人做事做長久一文中，作者為什麼自願當小師傅的助手？', o: ['覺得安裝冷氣機很有趣，所以也想嘗試一下', '不忍心看小師傅獨自如此辛勞', '因為小師傅是作者的偶像', '想要藉機減免安裝冷氣機的費用'] },
+      { q: '在做人做事做長久一文中，作者認為怎樣做才能「做人做事做長久」？', o: ['多從事不同的工作以累積經驗', '做事要盡好自己的本分並認真負責', '不管身處何地都要去幫助別人', '到處結交朋友'] },
+      { q: '在做人做事做長久一文中，從哪些細節無法看出小師傅具有敬業的態度？', o: ['即使獨自安裝冷氣機也絕不敷衍了事', '向作者直言安裝經驗不豐富，但會盡力做到讓作者滿意', '安裝好冷氣機後，就開始進行一系列的清潔工作', '只準備了一些輕便的工具放在隨身腰帶'] },
+      { q: '在幸福筆記本一文中，孩子們沒有做什麼事情來讓作者消除身上的疲倦？', o: ['給作者大大擁抱', '分享在學校發生的趣事', '給作者燦爛的笑臉', '分享今天的晚餐菜色'] },
+      { q: '根據幸福筆記本課文，有關「交通事故」的敘述，何者錯誤？', o: ['作者在等待車主出現的過程中感到很著急', '作者沒有賠償對方的想法', '車主並沒有責怪作者', '車主向作者分享了停車技巧'] }
+    ];
+
+    const answers = {};
+    let voices = [];
+    let currentSpeakEl = null;
+    let submitted = false;
+    const synth = window.speechSynthesis;
+
+    const circled = ['①','②','③','④'];
+
+    // 解析卷答案鍵：僅用於送出後的結果紀錄，不在學生作答畫面顯示。
+    const answerKey = {
+      '2-1': '寬容', '2-2': '焦急', '2-3': '口碑', '2-4': '效率', '2-5': '井然有序',
+      '3-1': '②', '3-2': '④', '3-3': '②', '3-4': '②', '3-5': '①',
+      '3-6': '④', '3-7': '①', '3-8': '②', '3-9': '④', '3-10': '①',
+      '3-11': '③', '3-12': '②', '3-13': '③', '3-14': '②', '3-15': '③',
+      '3-16': '②', '3-17': '②', '3-18': '④', '3-19': '④', '3-20': '②'
+    };
+
+    const answerFeedback = {
+      '2-5': '「井然有序」表示條理分明而有秩序；「耳目一新」表示所見所聞和過去不同，讓人有新奇、清新的感覺。',
+      '3-7': '課文中描述作者年邁的父親依然健康，因此「父親的健康狀況不佳」是錯誤敘述。',
+      '3-20': '課文中作者有表達願意支付修車費的誠意，因此「作者沒有賠償對方的想法」是錯誤敘述。'
+    };
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function renderVocab() {
+      const root = document.getElementById('vocabQuestions');
+      root.innerHTML = vocabData.map((item, idx) => {
+        const full = `${item.before}（${item.options.join('／')}）${item.after}`;
+        return `
+          <article class="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5" data-question="${item.id}">
+            <div class="mb-4 flex gap-3">
+              <span class="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-base font-bold text-white">${idx+1}</span>
+              <button type="button" class="speakable flex-1 whitespace-pre-line rounded-xl border border-transparent px-3 py-2 text-left font-medium hover:bg-white focus:outline-none focus:ring-4 focus:ring-yellow-200" data-speak="${escapeHtml(full)}">${escapeHtml(item.before)}（請選一個詞語）${escapeHtml(item.after)}</button>
+            </div>
+            <div class="ml-0 grid gap-3 sm:ml-12 sm:grid-cols-2">
+              ${item.options.map((opt, oi) => `
+                <button type="button" role="radio" aria-checked="false" data-answer-group="${item.id}" data-value="${escapeHtml(opt)}" class="word-choice speakable choice-btn rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-left font-bold hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-4 focus:ring-blue-100" data-speak="${escapeHtml(opt)}">
+                  ${circled[oi]} ${escapeHtml(opt)}
+                </button>
+              `).join('')}
+            </div>
+          </article>`;
+      }).join('');
+    }
+
+    function renderMC() {
+      const root = document.getElementById('mcQuestions');
+      root.innerHTML = mcData.map((item, idx) => {
+        const id = `3-${idx+1}`;
+        return `
+          <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" data-question="${id}">
+            <div class="mb-4 flex gap-3">
+              <span class="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-700 text-base font-bold text-white">${idx+1}</span>
+              <button type="button" class="speakable flex-1 whitespace-pre-line rounded-xl border border-transparent px-3 py-2 text-left font-semibold hover:bg-yellow-50 focus:outline-none focus:ring-4 focus:ring-yellow-200" data-speak="${escapeHtml(item.q)}">${escapeHtml(item.q)}</button>
+            </div>
+            <div class="ml-0 grid gap-3 sm:ml-12">
+              ${item.o.map((opt, oi) => `
+                <button type="button" role="radio" aria-checked="false" data-answer-group="${id}" data-value="${escapeHtml(circled[oi] + opt)}" class="choice-btn speakable rounded-xl border-2 border-slate-300 bg-slate-50 px-4 py-3 text-left hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-4 focus:ring-blue-100" data-speak="${escapeHtml(circled[oi] + opt)}">
+                  <span class="font-bold">${circled[oi]}</span>${escapeHtml(opt)}
+                </button>
+              `).join('')}
+            </div>
+          </article>`;
+      }).join('');
+    }
+
+    function clearHighlight() {
+      document.querySelectorAll('.speaking-now').forEach(el => el.classList.remove('speaking-now'));
+      currentSpeakEl = null;
+    }
+
+    function stopSpeech() {
+      synth.cancel();
+      clearHighlight();
+    }
+
+    function speakText(text, el) {
+      if (!('speechSynthesis' in window)) {
+        showToast('此瀏覽器不支援語音朗讀功能。');
+        return;
+      }
+      stopSpeech();
+      const utter = new SpeechSynthesisUtterance(text.replace(/\s+/g, ' ').trim());
+      const voiceName = document.getElementById('voiceSelect').value;
+      const selected = voices.find(v => v.name === voiceName);
+      if (selected) utter.voice = selected;
+      utter.lang = selected?.lang || 'zh-TW';
+      utter.rate = Number(document.getElementById('rateSlider').value);
+      currentSpeakEl = el;
+      el.classList.add('speaking-now');
+      utter.onend = clearHighlight;
+      utter.onerror = clearHighlight;
+      synth.speak(utter);
+    }
+
+    function populateVoices() {
+      voices = synth.getVoices().filter(v => /^zh/i.test(v.lang));
+      const select = document.getElementById('voiceSelect');
+      select.innerHTML = '';
+      if (!voices.length) {
+        const fallback = synth.getVoices();
+        voices = fallback;
+      }
+      if (!voices.length) {
+        select.innerHTML = '<option value="">系統未提供可選語音</option>';
+        return;
+      }
+      voices.sort((a,b) => {
+        const aTw = a.lang.toLowerCase().includes('tw') ? -1 : 0;
+        const bTw = b.lang.toLowerCase().includes('tw') ? -1 : 0;
+        return aTw - bTw || a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
+      });
+      voices.forEach(v => {
+        const option = document.createElement('option');
+        option.value = v.name;
+        option.textContent = `${v.name}（${v.lang}）`;
+        if (v.lang.toLowerCase().includes('zh-tw')) option.selected = true;
+        select.appendChild(option);
+      });
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.remove('hidden');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.add('hidden'), 2200);
+    }
+
+    function handleAnswer(btn) {
+      if (submitted) { showToast('答案已送出，不能再修改。'); return; }
+      const group = btn.dataset.answerGroup;
+      document.querySelectorAll(`[data-answer-group="${group}"]`).forEach(b => b.setAttribute('aria-checked', 'false'));
+      btn.setAttribute('aria-checked', 'true');
+      answers[group] = btn.dataset.value;
+    }
+
+    function getUnansweredIds() {
+      const ids = [...vocabData.map(item => item.id), ...mcData.map((_, idx) => `3-${idx+1}`)];
+      return ids.filter(id => !answers[id]);
+    }
+
+    function friendlyQuestionLabel(id) {
+      const [section, num] = id.split('-');
+      return section === '2' ? `第二大題第 ${num} 題` : `第三大題第 ${num} 題`;
+    }
+
+    function showIncompleteModal(unanswered) {
+      const modal = document.getElementById('alertModal');
+      const message = document.getElementById('alertMessage');
+      const labels = unanswered.map(friendlyQuestionLabel);
+      const preview = labels.slice(0, 8).join('、');
+      const more = labels.length > 8 ? `
+另外還有 ${labels.length - 8} 題。` : '';
+      message.textContent = `還有 ${unanswered.length} 題沒有作答：
+${preview}${more}
+
+請完成全部題目後再送出。`;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      const first = document.querySelector(`[data-question="${unanswered[0]}"]`);
+      if (first) {
+        document.querySelectorAll('.unanswered-ring').forEach(el => el.classList.remove('unanswered-ring'));
+        first.classList.add('unanswered-ring');
+        setTimeout(() => first.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120);
+      }
+    }
+
+    function hideModal(id) {
+      const modal = document.getElementById(id);
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function evaluateAnswer(id, value) {
+      if (!value) return false;
+      if (id.startsWith('2-')) return value === answerKey[id];
+      return value.startsWith(answerKey[id]);
+    }
+
+    function getQuestionInfo(id) {
+      if (id.startsWith('2-')) {
+        const item = vocabData.find(x => x.id === id);
+        return { question: `${item.before}（${item.options.join('／')}）${item.after}`, correct: answerKey[id] };
+      }
+      const idx = Number(id.split('-')[1]) - 1;
+      const item = mcData[idx];
+      const correctIndex = circled.indexOf(answerKey[id]);
+      return { question: item.q, correct: `${answerKey[id]}${item.o[correctIndex]}` };
+    }
+
+    function buildResult() {
+      const allIds = [...vocabData.map(item => item.id), ...mcData.map((_, idx) => `3-${idx+1}`)];
+      const correctIds = allIds.filter(id => evaluateAnswer(id, answers[id]));
+      const wrongIds = allIds.filter(id => !evaluateAnswer(id, answers[id]));
+      const score = correctIds.length * 2;
+      const name = document.getElementById('studentName').value.trim();
+      return { allIds, correctIds, wrongIds, score, name, time: new Date() };
+    }
+
+    function renderResult(result) {
+      document.getElementById('scoreBig').textContent = `${result.score} 分`;
+      document.getElementById('scoreSummary').textContent = `答對 ${result.correctIds.length} 題，共 ${result.allIds.length} 題`;
+      const root = document.getElementById('wrongFeedback');
+      if (!result.wrongIds.length) {
+        root.innerHTML = `<div class="correct-card rounded-xl bg-white p-4 font-bold text-emerald-800 shadow-sm">🎉 全部答對！做得很好。</div>`;
+      } else {
+        root.innerHTML = `<h3 class="text-xl font-black text-slate-900">錯題回饋</h3>` + result.wrongIds.map(id => {
+          const info = getQuestionInfo(id);
+          const extra = answerFeedback[id] ? `<div class="mt-2 rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-900">💡 ${escapeHtml(answerFeedback[id])}</div>` : '';
+          return `<article class="wrong-card rounded-xl bg-white p-4 shadow-sm">
+            <div class="font-black text-rose-700">${friendlyQuestionLabel(id)}</div>
+            <div class="mt-2 text-sm font-semibold text-slate-800 whitespace-pre-line">${escapeHtml(info.question)}</div>
+            <div class="mt-2 text-sm text-slate-600">你的答案：<strong>${escapeHtml(answers[id] || '未作答')}</strong></div>
+            <div class="mt-1 text-sm text-emerald-700">正確答案：<strong>${escapeHtml(info.correct)}</strong></div>
+            ${extra}
+          </article>`;
+        }).join('');
+      }
+      document.getElementById('resultPanel').classList.remove('hidden');
+      document.getElementById('modalScore').textContent = `${result.score} 分`;
+      document.getElementById('modalFeedback').textContent = result.wrongIds.length ? `答對 ${result.correctIds.length} 題；有 ${result.wrongIds.length} 題需要再看看。` : '全部答對！太棒了！';
+    }
+
+    function bindEvents() {
+      const startBtn = document.getElementById('startExamBtn');
+      const nameInput = document.getElementById('studentName');
+      const startExam = () => {
+        const name = nameInput.value.trim();
+        if (!name) { showToast('請先輸入姓名。'); nameInput.focus(); return; }
+        document.getElementById('studentDisplay').textContent = `學生：${name}`;
+        document.getElementById('nameGate').classList.add('hidden');
+      };
+      startBtn.addEventListener('click', startExam);
+      nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') startExam(); });
+
+      const settingsBtn = document.getElementById('settingsBtn');
+      const drawer = document.getElementById('settingsDrawer');
+      settingsBtn.addEventListener('click', () => {
+        const willOpen = drawer.classList.contains('hidden');
+        drawer.classList.toggle('hidden');
+        settingsBtn.setAttribute('aria-expanded', String(willOpen));
+      });
+
+      document.addEventListener('click', (e) => {
+        const speakEl = e.target.closest('[data-speak]');
+        if (speakEl) {
+          speakText(speakEl.dataset.speak, speakEl);
+          if (speakEl.dataset.answerGroup) handleAnswer(speakEl);
+        }
+      });
+      document.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-speak]')) {
+          e.preventDefault();
+          e.target.click();
+        }
+      });
+      document.getElementById('stopSpeechBtn').addEventListener('click', stopSpeech);
+
+      const rateSlider = document.getElementById('rateSlider');
+      rateSlider.addEventListener('input', () => {
+        document.getElementById('rateValue').textContent = `${Number(rateSlider.value).toFixed(1)}x`;
+      });
+      const fontSlider = document.getElementById('fontSlider');
+      fontSlider.addEventListener('input', () => {
+        document.documentElement.style.setProperty('--exam-font-size', `${fontSlider.value}px`);
+        document.getElementById('fontValue').textContent = `${fontSlider.value}px`;
+      });
+
+      document.getElementById('clearBtn').addEventListener('click', () => {
+        stopSpeech();
+        Object.keys(answers).forEach(k => delete answers[k]);
+        document.querySelectorAll('[data-answer-group]').forEach(b => b.setAttribute('aria-checked', 'false'));
+        submitted = false;
+        document.getElementById('submitBtn').classList.remove('hidden');
+        document.getElementById('clearBtn').classList.remove('hidden');
+        document.getElementById('downloadPngBtn').classList.add('hidden');
+        document.getElementById('downloadWordBtn').classList.add('hidden');
+        document.getElementById('resultPanel').classList.add('hidden');
+        document.querySelectorAll('[data-answer-group]').forEach(b => b.disabled = false);
+        showToast('已清除本次作答。');
+      });
+
+      document.getElementById('submitBtn').addEventListener('click', () => {
+        stopSpeech();
+        const unanswered = getUnansweredIds();
+        if (unanswered.length) {
+          showIncompleteModal(unanswered);
+          return;
+        }
+        submitted = true;
+        document.querySelectorAll('[data-answer-group]').forEach(b => b.disabled = true);
+        document.querySelectorAll('.unanswered-ring').forEach(el => el.classList.remove('unanswered-ring'));
+        document.getElementById('submitBtn').classList.add('hidden');
+        document.getElementById('clearBtn').classList.add('hidden');
+        const result = buildResult();
+        renderResult(result);
+        document.getElementById('downloadPngBtn').classList.remove('hidden');
+        document.getElementById('downloadWordBtn').classList.remove('hidden');
+        const modal = document.getElementById('submitModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      });
+
+      document.getElementById('alertCloseBtn').addEventListener('click', () => hideModal('alertModal'));
+      document.getElementById('submitCloseBtn').addEventListener('click', () => {
+        hideModal('submitModal');
+        document.getElementById('resultPanel').scrollIntoView({behavior:'smooth', block:'start'});
+      });
+      document.getElementById('downloadPngBtn').addEventListener('click', downloadPNG);
+      document.getElementById('downloadWordBtn').addEventListener('click', downloadWord);
+    }
+
+    function safeFileName(name) {
+      return name.replace(/[\\/:*?"<>|]/g, '_') || '學生';
+    }
+
+    function formatStamp(d) {
+      return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    function buildResultLines(result) {
+      const lines = [
+        '考卷報讀點讀工具－測驗結果',
+        `學生姓名：${result.name}`,
+        `作答時間：${result.time.toLocaleString('zh-TW')}`,
+        `分數：${result.score} / 50`,
+        `答對題數：${result.correctIds.length} / ${result.allIds.length}`,
+        ''
+      ];
+      if (!result.wrongIds.length) {
+        lines.push('錯題回饋：全部答對！');
+      } else {
+        lines.push('錯題回饋：');
+        result.wrongIds.forEach(id => {
+          const info = getQuestionInfo(id);
+          lines.push(`${friendlyQuestionLabel(id)}`);
+          lines.push(`題目：${info.question.replace(/\n/g, ' ')}`);
+          lines.push(`你的答案：${answers[id]}`);
+          lines.push(`正確答案：${info.correct}`);
+          if (answerFeedback[id]) lines.push(`提示：${answerFeedback[id]}`);
+          lines.push('');
+        });
+      }
+      return lines;
+    }
+
+    function downloadWord() {
+      stopSpeech();
+      if (!submitted) { showToast('請先送出答案。'); return; }
+      const result = buildResult();
+      const lines = buildResultLines(result);
+      const body = lines.map(line => line === '' ? '<p>&nbsp;</p>' : `<p>${escapeHtml(line)}</p>`).join('');
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:"Microsoft JhengHei",sans-serif;font-size:14pt;line-height:1.65}h1{font-size:22pt}p{margin:6px 0}</style></head><body>${body}</body></html>`;
+      const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `測驗結果_${safeFileName(result.name)}_${formatStamp(result.time)}.doc`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      showToast('Word 結果已下載。');
+    }
+
+    function wrapCanvasText(ctx, text, maxWidth) {
+      const chars = Array.from(text);
+      const lines = [];
+      let line = '';
+      for (const ch of chars) {
+        const test = line + ch;
+        if (ctx.measureText(test).width > maxWidth && line) {
+          lines.push(line);
+          line = ch;
+        } else line = test;
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    function downloadPNG() {
+      stopSpeech();
+      if (!submitted) { showToast('請先送出答案。'); return; }
+      const result = buildResult();
+      const lines = buildResultLines(result);
+      const width = 1400, padding = 80, lineHeight = 44;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.font = '28px Microsoft JhengHei, sans-serif';
+      const wrapped = [];
+      lines.forEach(line => {
+        if (!line) wrapped.push('');
+        else wrapped.push(...wrapCanvasText(ctx, line, width - padding*2));
+      });
+      canvas.width = width;
+      canvas.height = Math.max(900, padding*2 + wrapped.length*lineHeight + 80);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 42px Microsoft JhengHei, sans-serif';
+      ctx.fillText('考卷報讀點讀工具－測驗結果', padding, 70);
+      ctx.font = '28px Microsoft JhengHei, sans-serif';
+      let y = 130;
+      wrapped.forEach((line, i) => {
+        if (i===0) return;
+        if (line.startsWith('分數：')) { ctx.font = 'bold 40px Microsoft JhengHei, sans-serif'; ctx.fillStyle = '#047857'; }
+        else if (line.startsWith('錯題回饋')) { ctx.font = 'bold 32px Microsoft JhengHei, sans-serif'; ctx.fillStyle = '#be123c'; }
+        else if (/^第[二三]大題/.test(line)) { ctx.font = 'bold 28px Microsoft JhengHei, sans-serif'; ctx.fillStyle = '#be123c'; }
+        else { ctx.font = '28px Microsoft JhengHei, sans-serif'; ctx.fillStyle = '#0f172a'; }
+        ctx.fillText(line, padding, y);
+        y += lineHeight;
+      });
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `測驗結果_${safeFileName(result.name)}_${formatStamp(result.time)}.png`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        showToast('結果圖檔已下載。');
+      }, 'image/png');
+    }
+
+    renderVocab();
+    renderMC();
+    bindEvents();
+    populateVoices();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = populateVoices;
+      setTimeout(populateVoices, 300);
+    }
+    window.addEventListener('beforeunload', () => synth.cancel());
+  </script>
+</body>
+</html>
